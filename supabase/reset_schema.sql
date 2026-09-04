@@ -23,13 +23,14 @@ CREATE TYPE table_shape    AS ENUM ('square', 'rectangle', 'round');
 -- =============================================================================
 
 CREATE TABLE admins (
-  id             UUID        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email          TEXT        NOT NULL,
+  id             UUID          PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email          TEXT          NOT NULL,
   business_name  TEXT,
   openai_api_key TEXT,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   name           TEXT,
-  business_code  TEXT UNIQUE
+  business_code  TEXT UNIQUE,
+  tax_rate       NUMERIC(5, 2) NOT NULL DEFAULT 0 CHECK (tax_rate >= 0 AND tax_rate <= 100)
 );
 
 CREATE TABLE staff (
@@ -78,6 +79,7 @@ CREATE TABLE products (
   name         TEXT           NOT NULL,
   description  TEXT,
   price        NUMERIC(10, 2) NOT NULL CHECK (price >= 0),
+  cost_price   NUMERIC(10, 2) CHECK (cost_price >= 0),
   image_url    TEXT,
   stock        INTEGER        NOT NULL DEFAULT 0 CHECK (stock >= 0),
   is_available BOOLEAN        NOT NULL DEFAULT TRUE,
@@ -91,6 +93,8 @@ CREATE TABLE orders (
   table_id     UUID           REFERENCES tables(id)           ON DELETE SET NULL,
   type         order_type     NOT NULL,
   status       order_status   NOT NULL DEFAULT 'pending',
+  subtotal     NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
+  tax_amount   NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (tax_amount >= 0),
   total_amount NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
   notes        TEXT,
   created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
@@ -104,6 +108,7 @@ CREATE TABLE order_items (
   product_id UUID           NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
   quantity   INTEGER        NOT NULL CHECK (quantity > 0),
   unit_price NUMERIC(10, 2) NOT NULL CHECK (unit_price >= 0),
+  unit_cost  NUMERIC(10, 2) CHECK (unit_cost >= 0),
   created_at TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );
 

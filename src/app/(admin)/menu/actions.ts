@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
+// Discriminated result returned by every product action so the UI can render
+// inline success/error feedback instead of relying on redirects with ?error=.
+export type ProductActionResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
 async function requireAdminUser() {
   const supabase = createClient();
   const {
@@ -36,6 +42,13 @@ function parseNumber(value: FormDataEntryValue | null, fallback = 0) {
   if (typeof value !== "string") return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+// For optional numeric fields: a blank input means "no value" (NULL), not 0.
+function parseOptionalNumber(value: FormDataEntryValue | null): number | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export async function createCategory(formData: FormData) {
@@ -132,21 +145,37 @@ async function ensureCategoryBelongsToAdmin(categoryId: string, adminId: string)
   return !!category;
 }
 
-export async function createProduct(formData: FormData) {
+export async function createProduct(
+  _prev: ProductActionResult | null,
+  formData: FormData
+): Promise<ProductActionResult> {
   const { supabase, user } = await requireAdminUser();
   const name = String(formData.get("name") ?? "").trim();
   const categoryId = String(formData.get("categoryId") ?? "");
   const descriptionValue = String(formData.get("description") ?? "").trim();
   const price = parseNumber(formData.get("price"));
+  const costPrice = parseOptionalNumber(formData.get("costPrice"));
   const stock = parseNumber(formData.get("stock"));
   const imageUrlValue = String(formData.get("imageUrl") ?? "").trim();
 
   if (!name || !categoryId) {
-    redirect("/menu/products?error=Product name and category are required.");
+    return { ok: false, message: "Product name and category are required." };
+  }
+
+  if (price < 0) {
+    return { ok: false, message: "Price cannot be negative." };
+  }
+
+  if (costPrice !== null && costPrice < 0) {
+    return { ok: false, message: "Cost price cannot be negative." };
+  }
+
+  if (stock < 0) {
+    return { ok: false, message: "Starting stock cannot be negative." };
   }
 
   if (!(await ensureCategoryBelongsToAdmin(categoryId, user.id))) {
-    redirect("/menu/products?error=Choose a valid category for your business.");
+    return { ok: false, message: "Choose a valid category for your business." };
   }
 
   const { error } = await supabase.from("products").insert({
@@ -155,38 +184,54 @@ export async function createProduct(formData: FormData) {
     name,
     description: descriptionValue || null,
     price,
+    cost_price: costPrice,
     stock,
     image_url: imageUrlValue || null,
   });
 
   if (error) {
-    redirect("/menu/products?error=Failed to create product.");
+    return { ok: false, message: "Failed to create product." };
   }
 
   revalidatePath("/menu");
   revalidatePath("/menu/categories");
   revalidatePath("/menu/products");
-  redirect("/menu/products");
+  return { ok: true, message: `"${name}" added.` };
 }
 
-export async function updateProduct(formData: FormData) {
+export async function updateProduct(
+  _prev: ProductActionResult | null,
+  formData: FormData
+): Promise<ProductActionResult> {
   const { supabase, user } = await requireAdminUser();
   const id = String(formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   const categoryId = String(formData.get("categoryId") ?? "");
   const descriptionValue = String(formData.get("description") ?? "").trim();
   const price = parseNumber(formData.get("price"));
-  const stock = parseNumber(formData.get("stock"));
+  const costPrice = parseOptionalNumber(formData.get("costPrice"));
   const imageUrlValue = String(formData.get("imageUrl") ?? "").trim();
 
   if (!id || !name || !categoryId) {
-    redirect("/menu/products?error=Product update is missing required data.");
+    return { ok: false, message: "Product update is missing required data." };
+  }
+
+  if (price < 0) {
+    return { ok: false, message: "Price cannot be negative." };
+  }
+
+  if (costPrice !== null && costPrice < 0) {
+    return { ok: false, message: "Cost price cannot be negative." };
   }
 
   if (!(await ensureCategoryBelongsToAdmin(categoryId, user.id))) {
-    redirect("/menu/products?error=Choose a valid category for your business.");
+    return { ok: false, message: "Choose a valid category for your business." };
   }
 
+  // Stock is intentionally NOT written here. It changes only through
+  // adjustProductStock and through order completion (the complete_order RPC),
+  // so a slow edit form can never overwrite a concurrent sale or adjustment.
+  // A blank cost price clears the stored value (back to NULL).
   const { error } = await supabase
     .from("products")
     .update({
@@ -194,25 +239,39 @@ export async function updateProduct(formData: FormData) {
       name,
       description: descriptionValue || null,
       price,
-      stock,
+      cost_price: costPrice,
       image_url: imageUrlValue || null,
     })
     .eq("id", id)
     .eq("admin_id", user.id);
 
   if (error) {
-    redirect("/menu/products?error=Failed to update product.");
+    return { ok: false, message: "Failed to update product." };
   }
 
   revalidatePath("/menu");
   revalidatePath("/menu/products");
-  redirect("/menu/products");
+  return { ok: true, message: "Product details saved." };
 }
 
-export async function adjustProductStock(formData: FormData) {
+export async function adjustProductStock(
+  _prev: ProductActionResult | null,
+  formData: FormData
+): Promise<ProductActionResult> {
   const { supabase, user } = await requireAdminUser();
   const id = String(formData.get("id") ?? "");
   const delta = parseNumber(formData.get("delta"));
+
+  if (!id) {
+    return { ok: false, message: "Stock adjustment is missing required data." };
+  }
+
+  if (!Number.isInteger(delta) || delta === 0) {
+    return {
+      ok: false,
+      message: "Enter a non-zero whole number to adjust stock by.",
+    };
+  }
 
   const { data: product } = await supabase
     .from("products")
@@ -222,13 +281,16 @@ export async function adjustProductStock(formData: FormData) {
     .maybeSingle();
 
   if (!product) {
-    redirect("/menu/products?error=Product not found.");
+    return { ok: false, message: "Product not found." };
   }
 
   const nextStock = product.stock + delta;
 
   if (nextStock < 0) {
-    redirect("/menu/products?error=Stock cannot go below zero.");
+    return {
+      ok: false,
+      message: `Cannot reduce by ${Math.abs(delta)} — only ${product.stock} in stock.`,
+    };
   }
 
   const { error } = await supabase
@@ -238,18 +300,28 @@ export async function adjustProductStock(formData: FormData) {
     .eq("admin_id", user.id);
 
   if (error) {
-    redirect("/menu/products?error=Failed to adjust stock.");
+    return { ok: false, message: "Failed to adjust stock." };
   }
 
   revalidatePath("/menu");
   revalidatePath("/menu/products");
-  redirect("/menu/products");
+  return {
+    ok: true,
+    message: `Stock ${delta > 0 ? "increased" : "decreased"} to ${nextStock}.`,
+  };
 }
 
-export async function toggleProductAvailability(formData: FormData) {
+export async function toggleProductAvailability(
+  _prev: ProductActionResult | null,
+  formData: FormData
+): Promise<ProductActionResult> {
   const { supabase, user } = await requireAdminUser();
   const id = String(formData.get("id") ?? "");
   const nextValue = String(formData.get("nextValue") ?? "") === "true";
+
+  if (!id) {
+    return { ok: false, message: "Availability change is missing required data." };
+  }
 
   const { error } = await supabase
     .from("products")
@@ -258,10 +330,15 @@ export async function toggleProductAvailability(formData: FormData) {
     .eq("admin_id", user.id);
 
   if (error) {
-    redirect("/menu/products?error=Failed to update product availability.");
+    return { ok: false, message: "Failed to update product availability." };
   }
 
   revalidatePath("/menu");
   revalidatePath("/menu/products");
-  redirect("/menu/products");
+  return {
+    ok: true,
+    message: nextValue
+      ? "Product is now available in the POS."
+      : "Product is now hidden from the POS.",
+  };
 }

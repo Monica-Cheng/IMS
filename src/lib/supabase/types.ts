@@ -29,6 +29,7 @@ export type Database = {
           business_name:  string | null;
           business_code:  string;
           openai_api_key: string | null;
+          tax_rate:       number;
           created_at:     string;
         };
         Insert: {
@@ -38,6 +39,7 @@ export type Database = {
           business_name?:  string | null;
           business_code?:  string;       // DB generates one if omitted
           openai_api_key?: string | null;
+          tax_rate?:       number;       // defaults to 0
           created_at?:     string;
         };
         Update: {
@@ -47,6 +49,7 @@ export type Database = {
           business_name?:  string | null;
           business_code?:  string;
           openai_api_key?: string | null;
+          tax_rate?:       number;
           created_at?:     string;
         };
         Relationships: [];
@@ -215,6 +218,7 @@ export type Database = {
           name:         string;
           description:  string | null;
           price:        number;
+          cost_price:   number | null;
           image_url:    string | null;
           stock:        number;
           is_available: boolean;
@@ -227,6 +231,7 @@ export type Database = {
           name:          string;
           description?:  string | null;
           price:         number;
+          cost_price?:   number | null;
           image_url?:    string | null;
           stock?:        number;
           is_available?: boolean;
@@ -239,6 +244,7 @@ export type Database = {
           name?:         string;
           description?:  string | null;
           price?:        number;
+          cost_price?:   number | null;
           image_url?:    string | null;
           stock?:        number;
           is_available?: boolean;
@@ -269,6 +275,8 @@ export type Database = {
           table_id:     string | null;
           type:         Database["public"]["Enums"]["order_type"];
           status:       Database["public"]["Enums"]["order_status"];
+          subtotal:     number;
+          tax_amount:   number;
           total_amount: number;
           notes:        string | null;
           created_at:   string;
@@ -281,6 +289,8 @@ export type Database = {
           table_id?:     string | null;
           type:          Database["public"]["Enums"]["order_type"];
           status?:       Database["public"]["Enums"]["order_status"];
+          subtotal?:     number;       // defaults to 0
+          tax_amount?:   number;       // defaults to 0
           total_amount?: number;
           notes?:        string | null;
           created_at?:   string;
@@ -293,6 +303,8 @@ export type Database = {
           table_id?:     string | null;
           type?:         Database["public"]["Enums"]["order_type"];
           status?:       Database["public"]["Enums"]["order_status"];
+          subtotal?:     number;
+          tax_amount?:   number;
           total_amount?: number;
           notes?:        string | null;
           created_at?:   string;
@@ -329,6 +341,7 @@ export type Database = {
           product_id: string;
           quantity:   number;
           unit_price: number;
+          unit_cost:  number | null;
           created_at: string;
         };
         Insert: {
@@ -337,6 +350,7 @@ export type Database = {
           product_id:  string;
           quantity:    number;
           unit_price:  number;
+          unit_cost?:  number | null;
           created_at?: string;
         };
         Update: {
@@ -345,6 +359,7 @@ export type Database = {
           product_id?:  string;
           quantity?:    number;
           unit_price?:  number;
+          unit_cost?:   number | null;
           created_at?:  string;
         };
         Relationships: [
